@@ -11,9 +11,25 @@ This repository is designed to be:
 
 ---
 
+## Architecture overview
+
+Before diving into the code, the following figure from the **Attention Residuals** paper shows the core idea at a glance: **Standard Residuals**, **Full Attention Residuals**, and **Block Attention Residuals** side by side.
+
+<p align="center">
+  <img src="assets/images/attnres.png" alt="Overview of Attention Residuals" width="100%">
+</p>
+<p align="center"><em>Overview of Attention Residuals from the original paper.</em></p>
+
+At a high level:
+- **Standard Residuals** use a fixed additive shortcut
+- **Full Attention Residuals** learn to aggregate over all earlier layer outputs
+- **Block Attention Residuals** preserve the main idea while improving scalability
+
+---
+
 ## Why Attention Residuals?
 
-Standard residual connections are simple and effective, but they always inject the previous state with a fixed additive path.
+Standard residual connections are simple and effective, but they always inject the previous hidden state through a fixed additive path.
 
 Attention Residuals make this path **adaptive**:
 - **Full Attention Residuals** aggregate over all previous layer outputs
@@ -22,6 +38,8 @@ Attention Residuals make this path **adaptive**:
 - The final residual signal becomes a **softmax-weighted combination** of prior representations
 
 In practice, this makes the residual pathway more expressive while keeping the implementation compact.
+
+This repository implements the core building blocks behind that idea in a form that is easy to inspect, modify, and reuse.
 
 ---
 
@@ -37,10 +55,14 @@ Project structure:
 
 ```text
 attention-residuals/
+├── assets/
+│   └── images/
+│       └── attnres.png
 ├── attention_residuals/
 │   ├── attn_residuals.py
 │   └── attn_residuals_transformer.py
-└── LICENSE
+├── LICENSE
+└── README.md
 ```
 
 ---
@@ -52,6 +74,8 @@ attention-residuals/
 - **Clean separation** between the core residual operator and Transformer blocks
 - **MIT License** for flexible reuse
 - **Good starting point** for ablations, benchmarks, and architecture exploration
+
+With the high-level idea in place, the sections below show how to use the implementation directly.
 
 ---
 
@@ -155,13 +179,6 @@ It currently focuses on:
 - **Testing alternative residual designs**
 - **Plugging AttnRes into your own language model prototypes**
 - **Educational exploration of adaptive residual pathways**
-
----
-
-
-## License
-
-This project is released under the **MIT License**. See [LICENSE](/data/workspace/code/attention-residuals/LICENSE) for details.
 
 ---
 
