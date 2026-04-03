@@ -11,15 +11,18 @@ from typing import List
 
 
 class AttnRes(nn.Module):
-    """Full Attention Residuals: attends over ALL preceding layer outputs.
+    """Attention Residual aggregation over a sequence of preceding states.
 
-    For layer l, the hidden state is computed as:
-        h_l = sum_i alpha_{l,i} * v_i
+    Given a list of previously produced states and the current state, this
+    module computes a softmax-weighted sum over the full set of candidates.
+
+    Formally:
+        h = sum_i alpha_i * v_i
 
     where:
-        v_i are the outputs of each preceding layer (including embedding),
-        alpha_{l,i} = softmax_i(q_l . norm(v_i))
-        q_l is a learned pseudo-query vector (d-dimensional).
+        v_i are the candidate states,
+        alpha_i = softmax_i(q . norm(v_i)),
+        q is a learned pseudo-query vector.
     """
 
     def __init__(self, hidden_dim: int, norm_eps: float = 1e-5):
@@ -31,23 +34,23 @@ class AttnRes(nn.Module):
         nn.init.normal_(self.proj.weight, std=0.02)
 
     def forward(self, layer_outputs: List[torch.Tensor], current_output: torch.Tensor) -> torch.Tensor:
-        """Compute attention-weighted aggregation over layer outputs.
+        """Compute an attention-weighted aggregation over candidate states.
 
         Args:
-            layer_outputs: List of previous layer outputs, each [batch, seq_len, dim].
-            current_output: Current layer output [batch, seq_len, dim].
+            layer_outputs: List of previously produced states, each [batch, seq_len, dim].
+            current_output: Current state [batch, seq_len, dim].
 
         Returns:
             Aggregated hidden state [batch, seq_len, dim].
         """
-        # V: [num_layers, batch, seq_len, dim]
+        # V: [num_states, batch, seq_len, dim]
         V = torch.stack(layer_outputs + [current_output], dim=0)
-        # K: normalized values for computing attention logits
+        # K: normalized states used to compute attention logits
         K = self.norm(V)
-        # logits: [num_layers, batch, seq_len] via einsum with pseudo-query
+        # logits: [num_states, batch, seq_len] from the learned pseudo-query
         logits = torch.einsum("d, n b t d -> n b t", self.proj.weight.squeeze(0), K)
-        # alpha: [num_layers, batch, seq_len] - attention weights over depth
+        # alpha: [num_states, batch, seq_len] - attention weights over states
         alpha = logits.softmax(dim=0)
-        # h: [batch, seq_len, dim] - weighted sum
+        # h: [batch, seq_len, dim] - weighted sum over candidate states
         h = torch.einsum("n b t, n b t d -> b t d", alpha, V)
         return h

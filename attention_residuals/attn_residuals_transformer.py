@@ -1,6 +1,6 @@
 """Transformer model with Attention Residuals.
 
-Implements a GPT-style causal language model that replaces standard residual
+Implements a Transformer model that replaces standard residual
 connections with Attention Residuals (AttnRes) as described in
 "Attention Residuals" (Kimi Team, arXiv:2603.15031).
 """
@@ -9,7 +9,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, List
-from transformers.activations import ACT2FN
 
 from .attn_residuals import AttnRes
 
@@ -94,10 +93,8 @@ class Feedforward(nn.Module):
         self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=bias, **factory_kwargs)
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=bias, **factory_kwargs)
 
-        # Legacy string support for activation function.
-        if isinstance(activation, str):
-            self.act_fn = ACT2FN[activation]
-
+        self.act_fn = F.silu
+    
     def forward(self, x:torch.Tensor):
         down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
         return down_proj
@@ -145,7 +142,9 @@ class FullAttnResTransformerBlock(nn.Module):
             attention_mask: Optional attention mask.
             
         Returns:
-            Output tensor [batch, seq_len, dim].
+            A tuple of:
+                - Updated hidden states [batch, seq_len, dim].
+                - Updated list of intermediate layer outputs.
         """
         
         # self-attention layer
@@ -206,13 +205,13 @@ class BlockAttnResTransformerBlock(nn.Module):
         
         Args:
             hidden_states: Input tensor [batch, seq_len, dim].
-            block_outputs: List of block-level outputs (one per block).
-            cos: Rotary position embedding cosine component.
-            sin: Rotary position embedding sine component.
+            block_outputs: List of cached block-level outputs.
             attention_mask: Optional attention mask.
             
         Returns:
-            Output tensor [batch, seq_len, dim].
+            A tuple of:
+                - Updated partial block states [batch, seq_len, dim].
+                - Updated list of block-level outputs.
         """
         partial_block = hidden_states
         # Apply Block Attention Residual before attention
