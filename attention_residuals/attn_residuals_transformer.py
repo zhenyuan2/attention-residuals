@@ -8,7 +8,7 @@ connections with Attention Residuals (AttnRes) as described in
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, List
+from typing import Callable, List, Optional
 
 from .attn_residuals import AttnRes
 
@@ -71,7 +71,7 @@ class Feedforward(nn.Module):
         hidden_size: int,
         intermediate_size: int,
         bias: bool = True,
-        activation="silu",
+        activation: str | Callable[[torch.Tensor], torch.Tensor] = "silu",
         device = None,
         dtype = None
     ):
@@ -83,6 +83,7 @@ class Feedforward(nn.Module):
             intermediate_size (int): Hidden dimension of the feedforward layer.
             bias (bool): If set to ``False``, the layer will not learn an additive bias.
             Default: ``True``
+            activation: Activation function name or callable.
 
         """
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -93,7 +94,23 @@ class Feedforward(nn.Module):
         self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=bias, **factory_kwargs)
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=bias, **factory_kwargs)
 
-        self.act_fn = F.silu
+        self.act_fn = self._resolve_activation(activation)
+
+    @staticmethod
+    def _resolve_activation(activation: str | Callable[[torch.Tensor], torch.Tensor]) -> Callable[[torch.Tensor], torch.Tensor]:
+        if callable(activation):
+            return activation
+
+        activation_map = {
+            "gelu": F.gelu,
+            "relu": F.relu,
+            "silu": F.silu,
+        }
+        try:
+            return activation_map[activation.lower()]
+        except KeyError as exc:
+            supported = ", ".join(sorted(activation_map))
+            raise ValueError(f"Unsupported activation '{activation}'. Supported values: {supported}.") from exc
     
     def forward(self, x:torch.Tensor):
         down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
@@ -115,18 +132,20 @@ class FullAttnResTransformerBlock(nn.Module):
         resid_dropout: float = 0.0,
         bias: bool = True,
         norm_eps: float = 1e-5,
+        activation: str | Callable[[torch.Tensor], torch.Tensor] = "silu",
         device = None,
         dtype = None
     ):           
         super().__init__()
-        self.attn_norm = nn.RMSNorm(hidden_dim, eps=norm_eps)
+        factory_kwargs = {"device": device, "dtype": dtype}
+        self.attn_norm = nn.RMSNorm(hidden_dim, eps=norm_eps, device=device, dtype=dtype)
         self.attn = MultiHeadSelfAttention(hidden_dim, num_heads, attn_dropout, 
                                         resid_dropout, bias=bias, device=device, dtype=dtype)
-        self.attn_attn_res = AttnRes(hidden_dim, norm_eps)
+        self.attn_attn_res = AttnRes(hidden_dim, norm_eps, device=device, dtype=dtype)
 
-        self.ffn_norm = nn.RMSNorm(hidden_dim, eps=norm_eps)
-        self.ffn = Feedforward(hidden_dim, intermediate_dim, bias, device=device, dtype=dtype)
-        self.ffn_attn_res = AttnRes(hidden_dim, norm_eps)
+        self.ffn_norm = nn.RMSNorm(hidden_dim, eps=norm_eps, device=device, dtype=dtype)
+        self.ffn = Feedforward(hidden_dim, intermediate_dim, bias, activation=activation, device=device, dtype=dtype)
+        self.ffn_attn_res = AttnRes(hidden_dim, norm_eps, device=device, dtype=dtype)
 
     def forward(
         self,
@@ -179,21 +198,27 @@ class BlockAttnResTransformerBlock(nn.Module):
         resid_dropout: float = 0.0,
         bias: bool = True,
         norm_eps: float = 1e-5,
+        activation: str | Callable[[torch.Tensor], torch.Tensor] = "silu",
         device = None,
         dtype = None
     ):
         super().__init__()
+        if block_size < 2 or block_size % 2 != 0:
+            raise ValueError("block_size must be an even integer greater than or equal to 2.")
+
+        factory_kwargs = {"device": device, "dtype": dtype}
         self.layer_number = layer_number
         self.block_size = block_size
+        self.half_block_size = block_size // 2
         
-        self.attn_norm = nn.RMSNorm(hidden_dim, eps=norm_eps)
+        self.attn_norm = nn.RMSNorm(hidden_dim, eps=norm_eps, device=device, dtype=dtype)
         self.attn = MultiHeadSelfAttention(hidden_dim, num_heads, attn_dropout, 
                                         resid_dropout, bias=bias, device=device, dtype=dtype)
-        self.attn_block_attn_res = AttnRes(hidden_dim, norm_eps)
+        self.attn_block_attn_res = AttnRes(hidden_dim, norm_eps, device=device, dtype=dtype)
 
-        self.ffn_norm = nn.RMSNorm(hidden_dim, eps=norm_eps)
-        self.ffn = Feedforward(hidden_dim, intermediate_dim, bias, device=device, dtype=dtype)
-        self.ffn_block_attn_res = AttnRes(hidden_dim, norm_eps)
+        self.ffn_norm = nn.RMSNorm(hidden_dim, eps=norm_eps, device=device, dtype=dtype)
+        self.ffn = Feedforward(hidden_dim, intermediate_dim, bias, activation=activation, device=device, dtype=dtype)
+        self.ffn_block_attn_res = AttnRes(hidden_dim, norm_eps, device=device, dtype=dtype)
 
     def forward(
         self,
@@ -217,7 +242,7 @@ class BlockAttnResTransformerBlock(nn.Module):
         # Apply Block Attention Residual before attention
         h = self.attn_block_attn_res(block_outputs, partial_block)
 
-        if self.layer_number % (self.block_size // 2) == 0:
+        if self.layer_number % self.half_block_size == 0:
             block_outputs.append(partial_block)
             partial_block = None
     

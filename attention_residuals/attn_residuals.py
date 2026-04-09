@@ -25,11 +25,18 @@ class AttnRes(nn.Module):
         q is a learned pseudo-query vector.
     """
 
-    def __init__(self, hidden_dim: int, norm_eps: float = 1e-5):
+    def __init__(
+        self,
+        hidden_dim: int,
+        norm_eps: float = 1e-5,
+        device=None,
+        dtype=None,
+    ):
         super().__init__()
+        factory_kwargs = {"device": device, "dtype": dtype}
         self.hidden_dim = hidden_dim
-        self.proj = nn.Linear(hidden_dim, 1, bias=False)
-        self.norm = nn.RMSNorm(hidden_dim, eps=norm_eps)
+        self.proj = nn.Linear(hidden_dim, 1, bias=False, **factory_kwargs)
+        self.norm = nn.RMSNorm(hidden_dim, eps=norm_eps, device=device, dtype=dtype)
 
         nn.init.normal_(self.proj.weight, std=0.02)
 
